@@ -1,9 +1,1205 @@
-const firebaseConfig = {
-  apiKey: "AIzaSyD4-MOlUwOsWYV192w3jXNksndxhiLk3ro",
-  authDomain: "shiftsousai.firebaseapp.com",
-  databaseURL: "https://shiftsousai-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "shiftsousai",
-  storageBucket: "shiftsousai.firebasestorage.app",
-  messagingSenderId: "757113413871",
-  appId: "1:757113413871:web:77716bb0e5bcf0171dfb1a"
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>葬祭部門シフト管理システム</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+        import { getDatabase, ref, set, get, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyD4-MOlUwOsWYV192w3jXNksndxhiLk3ro",
+            authDomain: "shiftsousai.firebaseapp.com",
+            databaseURL: "https://shiftsousai-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "shiftsousai",
+            storageBucket: "shiftsousai.firebasestorage.app",
+            messagingSenderId: "757113413871",
+            appId: "1:757113413871:web:77716bb0e5bcf0171dfb1a"
+        };
+
+        const firebaseApp = initializeApp(firebaseConfig);
+        const db = getDatabase(firebaseApp);
+
+        window._firebaseDb = db;
+        window._firebaseRef = ref;
+        window._firebaseSet = set;
+        window._firebaseGet = get;
+        window._firebaseOnValue = onValue;
+        window._firebaseReady = true;
+
+        // Notify app that Firebase is ready
+        window.dispatchEvent(new Event('firebaseReady'));
+    </script>
+
+    <style>
+        body { font-family: 'Noto Sans JP', sans-serif; background-color: #f3f4f6; }
+        .table-container::-webkit-scrollbar { height: 10px; width: 10px; }
+        .table-container::-webkit-scrollbar-track { background: #f1f1f1; }
+        .table-container::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 5px; }
+        .table-container::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+        .sticky-col { position: sticky; left: 0; z-index: 10; background-color: white; border-right: 2px solid #e5e7eb; }
+        #loading-overlay { position: fixed; inset: 0; background: rgba(255,255,255,0.85); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+        @media print {
+            @page { size: A4 landscape; margin: 5mm; }
+            body { background-color: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            header, #view-dashboard > div:first-child, .no-print, #modal-save-load, #modal-csv-help, #modal-employee, #modal-cell, #modal-generate, #modal-confirm, #modal-message, #loading-overlay { display: none !important; }
+            main { overflow: visible !important; height: auto !important; display: block !important; }
+            #view-dashboard { padding: 0 !important; height: auto !important; display: block !important; }
+            .table-container { overflow: visible !important; height: auto !important; }
+            table { width: 100%; border-collapse: collapse; font-size: 9px; }
+            thead { display: table-header-group; }
+            tfoot { display: table-row-group; }
+            tr { page-break-inside: avoid; }
+            .sticky-col { position: static !important; border: 1px solid #e5e7eb !important; }
+            th, td { border: 1px solid #333 !important; }
+        }
+    </style>
+</head>
+<body class="text-gray-800 h-screen flex flex-col overflow-hidden">
+
+<!-- Loading Overlay -->
+<div id="loading-overlay">
+    <span class="material-icons text-indigo-600 text-5xl animate-spin">autorenew</span>
+    <p class="text-gray-700 font-bold text-lg">データを読み込み中...</p>
+    <p class="text-gray-400 text-sm" id="loading-status">Firebaseに接続しています</p>
+</div>
+
+<!-- Header -->
+<header class="bg-indigo-900 text-white shadow-md z-20 no-print">
+    <div class="container mx-auto px-4 h-16 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+            <span class="material-icons">event_note</span>
+            <h1 class="text-xl font-bold tracking-wide">葬祭部門シフト管理システム</h1>
+        </div>
+        <div class="flex items-center gap-2">
+            <!-- Sync status -->
+            <div id="sync-status" class="flex items-center gap-1 text-xs px-2 py-1 rounded bg-indigo-800 border border-indigo-600">
+                <span class="material-icons text-sm text-green-400">cloud_done</span>
+                <span class="text-green-300">クラウド同期中</span>
+            </div>
+            <nav class="flex gap-2 items-center ml-2">
+                <button onclick="app.switchTab('dashboard')" class="px-4 py-2 rounded hover:bg-indigo-800 transition flex items-center gap-2" id="nav-dashboard">
+                    <span class="material-icons text-sm">grid_view</span> シフト表
+                </button>
+                <button onclick="app.switchTab('employees')" class="px-4 py-2 rounded hover:bg-indigo-800 transition flex items-center gap-2" id="nav-employees">
+                    <span class="material-icons text-sm">people</span> 従業員マスタ
+                </button>
+                <button onclick="app.switchTab('settings')" class="px-4 py-2 rounded hover:bg-indigo-800 transition flex items-center gap-2" id="nav-settings">
+                    <span class="material-icons text-sm">settings</span> 設定・役割
+                </button>
+            </nav>
+        </div>
+    </div>
+</header>
+
+<!-- Main Content Area -->
+<main class="flex-1 overflow-hidden relative">
+
+    <!-- DASHBOARD VIEW -->
+    <div id="view-dashboard" class="h-full flex flex-col p-4">
+        <div class="bg-white p-4 rounded-lg shadow mb-4 flex flex-wrap gap-4 justify-between items-center no-print">
+            <div class="flex items-center gap-4">
+                <div class="flex items-center border rounded px-2 py-1 bg-gray-50">
+                    <button onclick="app.changeMonth(-1)" class="p-1 hover:bg-gray-200 rounded"><span class="material-icons">chevron_left</span></button>
+                    <span id="current-month-display" class="mx-4 font-bold text-lg w-32 text-center">2026年 1月</span>
+                    <button onclick="app.changeMonth(1)" class="p-1 hover:bg-gray-200 rounded"><span class="material-icons">chevron_right</span></button>
+                </div>
+                <div class="text-xs text-gray-500 flex flex-col justify-center gap-1">
+                    <div class="flex items-center"><span class="inline-block w-3 h-3 bg-red-100 border border-red-300 mr-1"></span>警告: ルール違反</div>
+                    <div class="flex items-center gap-2">
+                        <span class="flex items-center"><span class="material-icons text-sm mr-1" style="color:#EA3323;">close</span><span style="color:#EA3323;">希望休</span></span>
+                        <span class="flex items-center"><span class="material-icons text-sm mr-1 text-orange-600">work</span>業務予定</span>
+                    </div>
+                    <div class="flex items-center"><span class="material-icons text-sm mr-1 text-purple-600">star</span>特定日(友引等)</div>
+                </div>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="app.confirmAction('clear_month')" class="bg-white border border-gray-300 text-red-600 hover:bg-red-50 px-4 py-2 rounded shadow flex items-center gap-2 transition">
+                    <span class="material-icons text-sm">delete_outline</span> シフトクリア
+                </button>
+                <button onclick="app.openGenerateModal()" class="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded shadow flex items-center gap-2 transition">
+                    <span class="material-icons text-sm">autorenew</span> シフト自動生成
+                </button>
+                <div class="relative">
+                    <button id="export-menu-btn" onclick="app.toggleExportMenu(event)" class="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded shadow flex items-center gap-2 transition">
+                        <span class="material-icons text-sm">file_download</span> 出力 <span class="material-icons text-sm">expand_more</span>
+                    </button>
+                    <div id="export-menu" class="hidden absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-xl border border-gray-100 z-50 overflow-hidden">
+                        <div class="bg-gray-50 px-4 py-2 border-b text-[10px] font-bold text-gray-500 uppercase tracking-wider">形式を選択して保存</div>
+                        <button onclick="app.exportExcel()" class="w-full text-left px-4 py-3 hover:bg-green-50 text-sm flex items-center gap-3 text-gray-700 border-b border-gray-50">
+                            <span class="material-icons text-green-600">description</span>
+                            <div><div class="font-bold">Excel (.xlsx)</div><div class="text-xs text-gray-400">編集・加工用</div></div>
+                        </button>
+                        <button onclick="app.exportCSV()" class="w-full text-left px-4 py-3 hover:bg-blue-50 text-sm flex items-center gap-3 text-gray-700 border-b border-gray-50">
+                            <span class="material-icons text-blue-600">table_chart</span>
+                            <div><div class="font-bold">CSV (.csv)</div><div class="text-xs text-gray-400">データ連携用</div></div>
+                        </button>
+                        <button onclick="app.exportPDF()" class="w-full text-left px-4 py-3 hover:bg-red-50 text-sm flex items-center gap-3 text-gray-700">
+                            <span class="material-icons text-red-600">print</span>
+                            <div><div class="font-bold">印刷 / PDF保存</div><div class="text-xs text-gray-400">配布用</div></div>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow flex-1 overflow-hidden flex flex-col relative">
+            <div class="table-container overflow-auto flex-1" id="shift-table-container">
+                <table class="w-full text-sm border-collapse" id="shift-table">
+                    <thead class="bg-gray-100 text-gray-700 sticky top-0 z-20"></thead>
+                    <tbody id="shift-body" class="divide-y divide-gray-200"></tbody>
+                    <tfoot id="shift-footer" class="bg-gray-50 border-t-2 border-gray-300 font-bold text-gray-700"></tfoot>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- EMPLOYEES VIEW -->
+    <div id="view-employees" class="h-full p-4 overflow-auto hidden">
+        <div class="max-w-6xl mx-auto bg-white rounded-lg shadow p-6">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">従業員マスタ管理</h2>
+                <button onclick="app.openEmployeeModal()" class="bg-indigo-600 text-white px-4 py-2 rounded shadow hover:bg-indigo-700 flex items-center gap-2">
+                    <span class="material-icons">add</span> 新規登録
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-gray-100 border-b">
+                            <th class="p-3 font-semibold">氏名</th>
+                            <th class="p-3 font-semibold">雇用形態</th>
+                            <th class="p-3 font-semibold">1日の所定時間</th>
+                            <th class="p-3 font-semibold">可能な役割</th>
+                            <th class="p-3 font-semibold text-center">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="employee-list-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- SETTINGS VIEW -->
+    <div id="view-settings" class="h-full p-4 overflow-auto hidden">
+        <div class="max-w-4xl mx-auto space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="bg-white rounded-lg shadow p-6 border-l-4 border-pink-500">
+                    <h2 class="text-lg font-bold mb-4 flex items-center gap-2"><span class="material-icons text-pink-600">event_available</span> 希望休一括登録 (CSV)</h2>
+                    <p class="text-xs text-gray-600 mb-3">
+                        <button onclick="app.downloadCsvTemplate()" class="text-blue-600 underline hover:text-blue-800">ひな形DL</button> |
+                        <button onclick="app.openHelpModal()" class="text-blue-600 underline hover:text-blue-800">入力解説</button>
+                    </p>
+                    <div class="bg-pink-50 p-3 rounded border border-pink-100">
+                        <label class="block text-xs text-gray-500 mb-1">CSVファイルを選択</label>
+                        <input type="file" accept=".csv" class="block w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-pink-100 file:text-pink-700 hover:file:bg-pink-200" onchange="app.handleCsvUpload(this, 'holiday')">
+                    </div>
+                </div>
+                <div class="bg-white rounded-lg shadow p-6 border-l-4 border-blue-500">
+                    <h2 class="text-lg font-bold mb-4 flex items-center gap-2"><span class="material-icons text-blue-600">table_chart</span> シフト結果取込 (CSV)</h2>
+                    <p class="text-xs text-gray-600 mb-3">本アプリから出力したCSVを読み込みます。</p>
+                    <div class="bg-blue-50 p-3 rounded border border-blue-100">
+                        <label class="block text-xs text-gray-500 mb-1">出力済みCSVを選択</label>
+                        <input type="file" accept=".csv" class="block w-full text-xs text-gray-500 file:mr-2 file:py-1 file:px-2 file:rounded-full file:border-0 file:text-xs file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200" onchange="app.handleCsvUpload(this, 'shift_result')">
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-bold mb-4 flex items-center gap-2"><span class="material-icons text-red-600">gavel</span> 自動生成ルール設定</h2>
+                <div class="mb-6 pb-6 border-b">
+                    <h3 class="font-bold text-gray-700 mb-2">シフト生成の優先順位</h3>
+                    <p class="text-xs text-gray-500 mb-3">自動生成時の雇用形態別優先順位を設定します。</p>
+                    <div class="bg-gray-50 p-4 rounded border" id="priority-list-container"></div>
+                </div>
+                <div class="grid grid-cols-1 gap-6">
+                    <div class="flex items-center justify-between border-b pb-4">
+                        <div>
+                            <label class="font-bold text-gray-700 block">最大連続勤務日数</label>
+                            <p class="text-sm text-gray-500">これを超えると警告が出ます</p>
+                        </div>
+                        <input type="number" id="setting-max-consecutive" class="border rounded p-2 w-20 text-center" value="5">
+                    </div>
+                    <div class="border-b pb-4">
+                        <div class="mb-3">
+                            <label class="font-bold text-gray-700 block">役割ごとの1日あたり必要人数</label>
+                            <p class="text-sm text-gray-500">自動生成時の各役割の最低割り当て人数</p>
+                        </div>
+                        <div id="setting-role-counts" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 bg-gray-50 p-4 rounded"></div>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <button onclick="app.saveSettings()" class="bg-indigo-600 text-white px-6 py-2 rounded shadow hover:bg-indigo-700">設定を保存</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-bold mb-4 flex items-center gap-2"><span class="material-icons text-indigo-600">badge</span> 役割（ロール）設定</h2>
+                <p class="text-sm text-gray-600 mb-4">役割の追加・削除、名称変更が可能です。アイコン名は <a href="https://fonts.google.com/icons" target="_blank" class="text-blue-600 underline">Google Material Icons</a> の名称を入力してください。</p>
+                <div id="roles-config-editor" class="space-y-4"></div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow p-6 border-l-4 border-gray-600">
+                <h2 class="text-xl font-bold mb-4 flex items-center gap-2 text-gray-800"><span class="material-icons">settings_system_daydream</span> システム管理</h2>
+                <p class="text-sm text-gray-600 mb-4">データの初期化やキャッシュのクリアを行います。この操作は取り消せません。</p>
+                <div class="flex gap-4">
+                    <button onclick="app.confirmAction('reset_all')" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded shadow font-bold flex items-center gap-2">
+                        <span class="material-icons text-sm">delete_forever</span> 全データ削除（初期化）
+                    </button>
+                    <button onclick="app.confirmAction('clear_current_data')" class="bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 rounded shadow font-bold flex items-center gap-2">
+                        <span class="material-icons text-sm">cleaning_services</span> 現在のデータを空にする
+                    </button>
+                </div>
+                <p class="text-xs text-gray-400 mt-2">※「全データ削除」はFirebase上の全データを消去し、初期状態（ダミーデータ）に戻します。</p>
+            </div>
+        </div>
+    </div>
+</main>
+
+<!-- CSV Help Modal -->
+<div id="modal-csv-help" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center" onclick="if(event.target===this)app.closeModal('modal-csv-help')">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-lg p-6">
+        <h3 class="text-xl font-bold mb-4 flex items-center gap-2 text-gray-700"><span class="material-icons">help</span> CSV入力データの解説</h3>
+        <div class="space-y-4 text-sm text-gray-700">
+            <p>インポートするCSVファイルは、以下の列順で作成してください。</p>
+            <div class="bg-gray-100 p-3 rounded font-mono text-xs overflow-x-auto">氏名, 日付, 区分コード, 時間数</div>
+            <table class="w-full border-collapse text-left border">
+                <thead class="bg-gray-50"><tr><th class="border p-2">列名</th><th class="border p-2">説明</th></tr></thead>
+                <tbody>
+                    <tr><td class="border p-2 font-bold">氏名</td><td class="border p-2">従業員マスタと一致する氏名</td></tr>
+                    <tr><td class="border p-2 font-bold">日付</td><td class="border p-2">YYYY-MM-DD または YYYY/MM/DD 形式</td></tr>
+                    <tr><td class="border p-2 font-bold">区分コード</td><td class="border p-2"><ul class="list-disc pl-4 space-y-1"><li><b style="color:#EA3323;">9</b>: 1日休</li><li><b>1</b>: AM休</li><li><b>2</b>: PM休</li><li><b>3</b>: 時間休</li></ul></td></tr>
+                    <tr><td class="border p-2 font-bold">時間数</td><td class="border p-2">区分「3」の場合のみ（例: 2.0）</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="flex justify-end mt-6"><button onclick="app.closeModal('modal-csv-help')" class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 shadow">閉じる</button></div>
+    </div>
+</div>
+
+<!-- Employee Edit Modal -->
+<div id="modal-employee" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-md p-6">
+        <h3 class="text-xl font-bold mb-4" id="modal-employee-title">従業員編集</h3>
+        <form id="employee-form" onsubmit="event.preventDefault(); app.saveEmployee();">
+            <input type="hidden" id="emp-id">
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2">氏名</label>
+                <input type="text" id="emp-name" class="w-full border rounded px-3 py-2" required>
+            </div>
+            <div class="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="block text-gray-700 text-sm font-bold mb-2">雇用形態</label>
+                    <select id="emp-type" class="w-full border rounded px-3 py-2">
+                        <option value="正社員">正社員</option>
+                        <option value="パート">パート</option>
+                        <option value="臨時職員">臨時職員</option>
+                        <option value="管理職">管理職</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-gray-700 text-sm font-bold mb-2">1日の所定時間(h)</label>
+                    <input type="number" id="emp-hours" step="0.01" class="w-full border rounded px-3 py-2" value="7.75">
+                </div>
+            </div>
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2">対応可能な役割</label>
+                <div id="emp-roles-check" class="grid grid-cols-2 gap-2"></div>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button type="button" onclick="app.closeModal('modal-employee')" class="px-4 py-2 border rounded text-gray-600 hover:bg-gray-100">キャンセル</button>
+                <button type="submit" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Cell Edit Modal -->
+<div id="modal-cell" class="fixed inset-0 bg-black bg-opacity-30 hidden z-50 flex items-center justify-center" onclick="if(event.target===this)app.closeModal('modal-cell')">
+    <div class="bg-white rounded-lg shadow-xl p-4 w-72">
+        <h4 class="font-bold text-center mb-3 text-gray-700" id="cell-modal-title">シフト変更</h4>
+        <div class="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto" id="cell-role-options"></div>
+        <div class="border-t my-2 pt-2 space-y-3">
+            <div>
+                <label class="block text-xs font-bold text-gray-500 mb-1">業務予定 (勤務としてカウント)</label>
+                <div class="flex items-center gap-1 mb-1">
+                    <span class="text-xs w-8 text-orange-800 font-bold">出張</span>
+                    <button onclick="app.setCellRequest({type:'trip',period:'all'})" class="text-[10px] bg-orange-50 border border-orange-200 text-orange-800 rounded px-2 py-1 hover:bg-orange-100">全</button>
+                    <button onclick="app.setCellRequest({type:'trip',period:'am'})" class="text-[10px] bg-white border border-orange-200 text-orange-800 rounded px-2 py-1 hover:bg-orange-50">AM</button>
+                    <button onclick="app.setCellRequest({type:'trip',period:'pm'})" class="text-[10px] bg-white border border-orange-200 text-orange-800 rounded px-2 py-1 hover:bg-orange-50">PM</button>
+                </div>
+                <div class="flex items-center gap-1 mb-1">
+                    <span class="text-xs w-8 text-blue-800 font-bold">会議</span>
+                    <button onclick="app.setCellRequest({type:'meeting',period:'all'})" class="text-[10px] bg-blue-50 border border-blue-200 text-blue-800 rounded px-2 py-1 hover:bg-blue-100">全</button>
+                    <button onclick="app.setCellRequest({type:'meeting',period:'am'})" class="text-[10px] bg-white border border-blue-200 text-blue-800 rounded px-2 py-1 hover:bg-blue-50">AM</button>
+                    <button onclick="app.setCellRequest({type:'meeting',period:'pm'})" class="text-[10px] bg-white border border-blue-200 text-blue-800 rounded px-2 py-1 hover:bg-blue-50">PM</button>
+                </div>
+                <div class="flex items-center gap-1">
+                    <span class="text-xs w-8 text-green-800 font-bold">その他</span>
+                    <button onclick="app.setCellRequest({type:'other_work',period:'all'})" class="text-[10px] bg-green-50 border border-green-200 text-green-800 rounded px-2 py-1 hover:bg-green-100">全</button>
+                    <button onclick="app.setCellRequest({type:'other_work',period:'am'})" class="text-[10px] bg-white border border-green-200 text-green-800 rounded px-2 py-1 hover:bg-green-50">AM</button>
+                    <button onclick="app.setCellRequest({type:'other_work',period:'pm'})" class="text-[10px] bg-white border border-green-200 text-green-800 rounded px-2 py-1 hover:bg-green-50">PM</button>
+                </div>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-gray-500 mb-1">希望休 (休み)</label>
+                <div class="grid grid-cols-2 gap-2 mb-2">
+                    <button onclick="app.setCellRequest({type:'all'})" class="text-sm bg-gray-50 border border-gray-300 rounded py-1 hover:bg-gray-100" style="color:#EA3323;">全日休</button>
+                    <button onclick="app.setCellRequest({type:'am'})" class="text-sm bg-gray-50 border border-gray-300 rounded py-1 hover:bg-gray-100" style="color:#EA3323;">AM休</button>
+                    <button onclick="app.setCellRequest({type:'pm'})" class="text-sm bg-gray-50 border border-gray-300 rounded py-1 hover:bg-gray-100" style="color:#EA3323;">PM休</button>
+                    <button onclick="app.toggleTimeInput()" class="text-sm bg-gray-50 border border-gray-300 rounded py-1 hover:bg-gray-100" style="color:#EA3323;">時間休</button>
+                </div>
+                <div id="req-time-input" class="hidden mb-2 p-2 bg-gray-50 rounded border">
+                    <label class="text-xs text-gray-600 block mb-1">時間数 (h)</label>
+                    <div class="flex gap-2">
+                        <input type="number" id="req-hours-val" class="border rounded px-2 py-1 w-full text-sm" placeholder="2.0">
+                        <button onclick="app.submitTimeRequest()" class="bg-blue-600 text-white text-xs px-3 rounded hover:bg-blue-700">登録</button>
+                    </div>
+                </div>
+            </div>
+            <button onclick="app.setCellRequest(null)" class="w-full text-left px-3 py-2 rounded hover:bg-gray-100 text-gray-500 text-sm mt-1 border border-transparent">
+                <span class="material-icons text-sm align-middle">clear</span> 設定なし（クリア）
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Generate Modal -->
+<div id="modal-generate" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-sm p-6">
+        <h3 class="text-lg font-bold mb-4">シフト自動生成</h3>
+        <p class="text-sm text-gray-600 mb-4">現在表示中の月と<strong>翌月分</strong>のシフトを自動生成します。</p>
+        <div class="mb-4 bg-yellow-50 border border-yellow-200 p-3 rounded text-sm text-yellow-800">
+            <span class="material-icons text-sm align-middle">warning</span> 既存の未確定シフトは上書きされます。
+        </div>
+        <div class="flex justify-end gap-2">
+            <button onclick="app.closeModal('modal-generate')" class="px-4 py-2 border rounded hover:bg-gray-100">キャンセル</button>
+            <button onclick="app.runAutoGenerate()" class="px-4 py-2 bg-teal-600 text-white rounded hover:bg-teal-700 shadow">生成開始</button>
+        </div>
+    </div>
+</div>
+
+<!-- Confirm Modal -->
+<div id="modal-confirm" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-sm p-6">
+        <h3 class="text-lg font-bold mb-4 text-red-600 flex items-center gap-2"><span class="material-icons">warning</span> 確認</h3>
+        <p id="confirm-text" class="text-gray-700 mb-6 font-bold"></p>
+        <div id="confirm-options" class="mb-6 hidden bg-red-50 p-3 rounded border border-red-100">
+            <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" id="confirm-option-check" class="w-5 h-5 text-red-600 rounded">
+                <span class="text-sm font-bold text-red-700" id="confirm-option-label">希望休もすべて削除する</span>
+            </label>
+        </div>
+        <div class="flex justify-end gap-2">
+            <button onclick="app.closeModal('modal-confirm')" class="px-4 py-2 border rounded hover:bg-gray-100">キャンセル</button>
+            <button onclick="app.executeAction()" id="confirm-btn-exec" class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 shadow">実行する</button>
+        </div>
+    </div>
+</div>
+
+<!-- Message Modal -->
+<div id="modal-message" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-sm p-6">
+        <h3 class="text-lg font-bold mb-2 flex items-center gap-2 text-indigo-700"><span class="material-icons">info</span> 通知</h3>
+        <p id="message-text" class="text-gray-700 mb-6"></p>
+        <div class="flex justify-end"><button onclick="app.closeModal('modal-message')" class="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 shadow">OK</button></div>
+    </div>
+</div>
+
+<script>
+const app = {
+    data: {
+        currentDate: new Date(),
+        employees: [],
+        roles: [],
+        shifts: {},
+        requests: {},
+        specificDays: {},
+        settings: {
+            maxConsecutiveDays: 5,
+            minStaffCounts: {},
+            assignmentPriority: ['パート', '臨時職員', '正社員', '管理職']
+        }
+    },
+    ui: { selectedCell: null, pendingAction: null },
+    _saveTimer: null,
+
+    holidays: [
+        '2025-01-01','2025-01-13','2025-02-11','2025-02-23','2025-02-24','2025-03-20','2025-04-29','2025-05-03','2025-05-04','2025-05-05','2025-05-06','2025-07-21','2025-08-11','2025-09-15','2025-09-23','2025-10-13','2025-11-03','2025-11-23','2025-11-24',
+        '2026-01-01','2026-01-12','2026-02-11','2026-02-23','2026-03-21','2026-04-29','2026-05-03','2026-05-04','2026-05-05','2026-05-06','2026-07-20','2026-08-11','2026-09-21','2026-09-22','2026-09-23','2026-10-12','2026-11-03','2026-11-23'
+    ],
+
+    // =====================
+    // Firebase helpers
+    // =====================
+    get db() { return window._firebaseDb; },
+    fbRef(path) { return window._firebaseRef(this.db, path); },
+    async fbSet(path, val) { return window._firebaseSet(this.fbRef(path), val); },
+    async fbGet(path) { return window._firebaseGet(this.fbRef(path)); },
+
+    setSyncStatus(ok) {
+        const el = document.getElementById('sync-status');
+        if (ok) {
+            el.innerHTML = '<span class="material-icons text-sm text-green-400">cloud_done</span><span class="text-green-300">クラウド同期中</span>';
+        } else {
+            el.innerHTML = '<span class="material-icons text-sm text-yellow-400">cloud_off</span><span class="text-yellow-300">保存中...</span>';
+        }
+    },
+
+    // =====================
+    // INIT
+    // =====================
+    async init() {
+        document.getElementById('loading-status').textContent = 'データを取得中...';
+        try {
+            await this.loadData();
+            if (this.data.employees.length === 0) {
+                document.getElementById('loading-status').textContent = '初期データを生成中...';
+                this.seedDummyData();
+                await this.saveData();
+            }
+            if (!this.data.roles || this.data.roles.length === 0) {
+                this.initDefaultRoles();
+                await this.saveData();
+            }
+        } catch(e) {
+            console.error('Init error:', e);
+            document.getElementById('loading-status').textContent = 'エラー: ' + e.message;
+        }
+
+        this.renderDashboard();
+        this.renderEmployeeList();
+        this.renderSettings();
+        this.setupEventListeners();
+
+        // Real-time listener for changes from other users
+        window._firebaseOnValue(this.fbRef('appData'), (snapshot) => {
+            const remote = snapshot.val();
+            if (!remote) return;
+            // Merge remote data silently
+            if (remote.employees) this.data.employees = remote.employees;
+            if (remote.shifts) this.data.shifts = remote.shifts;
+            if (remote.requests) this.data.requests = remote.requests;
+            if (remote.specificDays) this.data.specificDays = remote.specificDays;
+            if (remote.settings) this.data.settings = { ...this.data.settings, ...remote.settings };
+            if (remote.roles) this.data.roles = remote.roles;
+            this.renderDashboard();
+            this.renderEmployeeList();
+        });
+
+        document.getElementById('loading-overlay').style.display = 'none';
+    },
+
+    setupEventListeners() {
+        document.addEventListener('click', (e) => {
+            const menu = document.getElementById('export-menu');
+            const btn = document.getElementById('export-menu-btn');
+            if (!menu.classList.contains('hidden')) {
+                if (!menu.contains(e.target) && !btn.contains(e.target)) menu.classList.add('hidden');
+            }
+        });
+    },
+
+    initDefaultRoles() {
+        this.data.roles = [
+            { id: 'off', name: '公休', short: '休', color: '#f3f4f6', text: '#9ca3af', icon: 'weekend' },
+            { id: 'ceremony', name: 'セレモニー担当', short: '式', color: '#e0e7ff', text: '#3730a3', icon: 'temple_buddhist' },
+            { id: 'driver', name: '運転手', short: '運', color: '#dcfce7', text: '#166534', icon: 'directions_car' },
+            { id: 'reception', name: '受付担当', short: '受', color: '#fef3c7', text: '#92400e', icon: 'support_agent' },
+            { id: 'night', name: '夜受付', short: '夜', color: '#312e81', text: '#ffffff', icon: 'phone_in_talk' },
+            { id: 'office', name: '事務・雑務', short: '務', color: '#f3e8ff', text: '#6b21a8', icon: 'computer' },
+        ];
+    },
+
+    // =====================
+    // DATA: Firebase CRUD
+    // =====================
+    async loadData() {
+        const snap = await this.fbGet('appData');
+        const stored = snap.val();
+        if (stored) {
+            this.data.employees = stored.employees || [];
+            this.data.employees.forEach(e => {
+                if (typeof e.dailyHours === 'undefined') e.dailyHours = 7.75;
+            });
+            this.data.shifts = stored.shifts || {};
+            this.data.requests = stored.requests || {};
+            this.data.specificDays = stored.specificDays || {};
+            if (stored.settings) {
+                this.data.settings = { ...this.data.settings, ...stored.settings };
+                if (!this.data.settings.minStaffCounts) this.data.settings.minStaffCounts = { ceremony:1, driver:1, reception:1, night:2 };
+                if (!this.data.settings.assignmentPriority) this.data.settings.assignmentPriority = ['パート','臨時職員','正社員','管理職'];
+            }
+            if (stored.roles) this.data.roles = stored.roles;
+            if (stored.currentDate) this.data.currentDate = new Date(stored.currentDate);
+        } else {
+            this.data.settings.minStaffCounts = { ceremony:2, driver:1, reception:1, night:2, office:0 };
+        }
+    },
+
+    // Debounced save to avoid too many writes
+    saveData() {
+        this.setSyncStatus(false);
+        clearTimeout(this._saveTimer);
+        this._saveTimer = setTimeout(async () => {
+            try {
+                await this.fbSet('appData', {
+                    employees: this.data.employees,
+                    shifts: this.data.shifts,
+                    requests: this.data.requests,
+                    specificDays: this.data.specificDays,
+                    settings: this.data.settings,
+                    roles: this.data.roles,
+                    currentDate: this.data.currentDate.toISOString()
+                });
+                this.setSyncStatus(true);
+            } catch(e) {
+                console.error('Save error:', e);
+                this.setSyncStatus(false);
+            }
+        }, 800);
+    },
+
+    seedDummyData() {
+        this.initDefaultRoles();
+        const lastNames = ['佐藤','鈴木','高橋','田中','伊藤','渡辺','山本','中村','小林','加藤','吉田','山田','佐々木','山口','松本','井上','木村','林','斎藤','清水','山崎','池田'];
+        const firstNames = ['健一','美咲','大輔','さくら','拓也','優子','直人','真琴','達也','愛','剛','京子','翔太','七海','亮','結衣','和也','里奈','哲也','美穂','晋','恵'];
+        for (let i = 0; i < 22; i++) {
+            const roles = ['ceremony','driver','reception','office'];
+            if (i < 10) roles.push('night');
+            let type = 'パート';
+            if (i < 3) type = '管理職';
+            else if (i < 10) type = '正社員';
+            else if (i < 13) type = '臨時職員';
+            this.data.employees.push({ id:'emp_'+(i+1), name:lastNames[i]+' '+firstNames[i], type, dailyHours:7.75, roles });
+        }
+    },
+
+    // =====================
+    // CSV
+    // =====================
+    downloadCsvTemplate() {
+        const rows = [["氏名","日付(YYYY-MM-DD)","区分コード","時間数"].join(","), "サンプル太郎,2026-01-01,9,", "サンプル花子,2026-01-02,3,2.0"];
+        const blob = new Blob(["\uFEFF" + rows.join("\r\n")], { type:'text/csv;charset=utf-8;' });
+        this.downloadBlob(blob, "shift_request_template.csv");
+    },
+
+    downloadBlob(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click();
+        document.body.removeChild(a); URL.revokeObjectURL(url);
+    },
+
+    openHelpModal() { document.getElementById('modal-csv-help').classList.remove('hidden'); },
+
+    handleCsvUpload(input, mode) {
+        const file = input.files[0]; if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            if (mode === 'holiday') this.processHolidayCsv(e.target.result);
+            else if (mode === 'shift_result') this.processShiftResultCsv(e.target.result);
+        };
+        reader.readAsText(file);
+        input.value = '';
+    },
+
+    processHolidayCsv(text) {
+        const lines = text.split(/\r\n|\n/);
+        let ok = 0, err = 0;
+        for (let i = 1; i < lines.length; i++) {
+            const cols = lines[i].trim().split(',');
+            if (cols.length < 3) continue;
+            const name = cols[0].trim(), dateStr = cols[1].trim().replace(/\//g,'-'), typeCode = cols[2].trim(), val = cols[3]?.trim();
+            const emp = this.data.employees.find(e => e.name === name);
+            if (!emp || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) { err++; continue; }
+            let req = null;
+            if (typeCode==='9') req={type:'all'};
+            else if (typeCode==='1') req={type:'am'};
+            else if (typeCode==='2') req={type:'pm'};
+            else if (typeCode==='3') req={type:'time',value:val};
+            if (req) {
+                const key = `${dateStr}_${emp.id}`;
+                this.data.requests[key] = req;
+                if (req.type==='all') this.data.shifts[key] = 'off';
+                ok++;
+            } else err++;
+        }
+        this.saveData(); this.renderDashboard();
+        this.showMessage(`希望休インポート完了\n成功: ${ok}件\n失敗: ${err}件`);
+    },
+
+    processShiftResultCsv(text) {
+        const lines = text.split(/\r\n|\n/);
+        if (lines.length < 2) return;
+        const headers = lines[0].split(',');
+        const dates = [];
+        for (let i = 1; i < headers.length; i++) {
+            const d = headers[i].trim();
+            if (/^\d{4}-\d{2}-\d{2}/.test(d)) dates.push({ index:i, dateStr:d.substring(0,10) });
+        }
+        if (!dates.length) { this.showMessage('日付ヘッダーを認識できませんでした。'); return; }
+        const roleMap = {};
+        this.data.roles.forEach(r => roleMap[r.name] = r.id);
+        let count = 0;
+        for (let i = 1; i < lines.length; i++) {
+            const cols = lines[i].split(',');
+            const emp = this.data.employees.find(e => e.name === cols[0]?.trim());
+            if (!emp) continue;
+            dates.forEach(d => {
+                if (d.index < cols.length) {
+                    const val = cols[d.index].trim(), key = `${d.dateStr}_${emp.id}`;
+                    if (val && roleMap[val]) { this.data.shifts[key] = roleMap[val]; count++; }
+                    else if (val === '') delete this.data.shifts[key];
+                }
+            });
+        }
+        this.saveData(); this.renderDashboard();
+        this.showMessage(`シフト結果インポート完了\n${count}件反映しました。`);
+    },
+
+    // =====================
+    // NAVIGATION
+    // =====================
+    switchTab(tab) {
+        ['dashboard','employees','settings'].forEach(t => {
+            document.getElementById(`view-${t}`).classList.add('hidden');
+            document.getElementById(`nav-${t}`).classList.remove('bg-indigo-800');
+        });
+        document.getElementById(`view-${tab}`).classList.remove('hidden');
+        document.getElementById(`nav-${tab}`).classList.add('bg-indigo-800');
+        if (tab === 'dashboard') this.renderDashboard();
+    },
+
+    // =====================
+    // DASHBOARD
+    // =====================
+    changeMonth(delta) {
+        this.data.currentDate.setMonth(this.data.currentDate.getMonth() + delta);
+        this.saveData();
+        this.renderDashboard();
+    },
+
+    getDaysInMonth(date) {
+        const y = date.getFullYear(), m = date.getMonth();
+        const days = new Date(y, m+1, 0).getDate();
+        const result = [];
+        for (let i = 1; i <= days; i++) {
+            const d = new Date(y, m, i);
+            const ds = `${y}-${String(m+1).padStart(2,'0')}-${String(i).padStart(2,'0')}`;
+            result.push({ date:i, day:d.getDay(), fullDate:ds, isHoliday:this.holidays.includes(ds), isSpecific:!!this.data.specificDays[ds] });
+        }
+        return result;
+    },
+
+    toggleSpecificDay(dateStr) {
+        if (this.data.specificDays[dateStr]) delete this.data.specificDays[dateStr];
+        else this.data.specificDays[dateStr] = true;
+        this.saveData(); this.renderDashboard();
+    },
+
+    countStats(emp, days) {
+        let work=0, holiday=0, night=0, weekendWork=0;
+        days.forEach(d => {
+            const k = `${d.fullDate}_${emp.id}`, r=this.data.shifts[k], req=this.data.requests[k];
+            const isTripEtc = req && (req.type==='trip'||req.type==='meeting'||req.type==='other_work');
+            const isWork = (r && r!=='off') || isTripEtc;
+            if (r==='off' && !isTripEtc) holiday++;
+            else if (r==='night') { work++; night++; }
+            else if (isWork) work++;
+            if (isWork && (d.day===0||d.day===6||d.isHoliday||d.isSpecific)) weekendWork++;
+        });
+        const totalHours = emp.type==='パート' ? (work*(emp.dailyHours||7.75)).toFixed(1) : null;
+        return { work, holiday, night, totalHours, weekendWork };
+    },
+
+    renderDashboard() {
+        const y = this.data.currentDate.getFullYear(), m = this.data.currentDate.getMonth();
+        document.getElementById('current-month-display').textContent = `${y}年 ${m+1}月`;
+        const days = this.getDaysInMonth(this.data.currentDate);
+        const dayNames = ['日','月','火','水','木','金','土'];
+
+        // Header
+        let hHtml = '<tr><th class="sticky-col bg-gray-100 p-2 min-w-[200px] border text-left z-30 shadow-sm">氏名 / 月間集計</th>';
+        days.forEach(d => {
+            let cc = 'text-gray-700', bg = '';
+            if (d.day===0||d.isHoliday) { cc='text-red-600'; bg='bg-red-50'; }
+            else if (d.day===6) { cc='text-blue-600'; bg='bg-blue-50'; }
+            if (d.isSpecific) bg='bg-purple-50';
+            hHtml += `<th class="p-1 min-w-[40px] border text-center ${bg} cursor-pointer group hover:bg-gray-200 transition" onclick="app.toggleSpecificDay('${d.fullDate}')">
+                <div class="${cc} text-xs font-bold">${d.date}</div>
+                <div class="${cc} text-xs font-normal">(${dayNames[d.day]})</div>
+                ${d.isHoliday?'<div class="text-[9px] text-red-500 font-bold leading-none">祝</div>':''}
+                ${d.isSpecific?'<div class="text-[9px] text-purple-600 font-bold leading-none">★</div>':'<div class="text-[9px] text-gray-300 opacity-0 group-hover:opacity-100">★</div>'}
+            </th>`;
+        });
+        hHtml += '</tr>';
+        document.querySelector('#shift-table thead').innerHTML = hHtml;
+
+        // Body
+        let bHtml = '';
+        const dailyCounts = {};
+        days.forEach(d => { dailyCounts[d.fullDate]={}; this.data.roles.forEach(r => dailyCounts[d.fullDate][r.id]=0); });
+
+        this.data.employees.forEach(emp => {
+            const stats = this.countStats(emp, days);
+            const isNight = emp.roles && emp.roles.includes('night');
+            bHtml += `<tr><td class="sticky-col bg-white p-2 border text-gray-700 z-10 flex flex-col justify-center h-[70px]">
+                <div class="font-bold flex items-center justify-between">
+                    <span>${emp.name} <span class="text-xs font-normal text-gray-500">(${emp.type})</span></span>
+                    ${isNight?'<span class="material-icons text-indigo-800 text-[12px]" title="宿直可能">nightlight_round</span>':''}
+                </div>
+                <div class="flex flex-wrap gap-1 mt-1 text-[10px] text-gray-500 font-mono">
+                    <span class="bg-gray-100 px-1 rounded">出:${stats.work}</span>
+                    <span class="bg-gray-100 px-1 rounded">休:${stats.holiday}</span>
+                    <span class="bg-indigo-50 text-indigo-700 px-1 rounded">夜:${stats.night}</span>
+                    <span class="bg-red-50 text-red-700 px-1 rounded font-bold border border-red-100">休出:${stats.weekendWork}</span>
+                    ${stats.totalHours?`<span class="bg-yellow-50 text-yellow-800 px-1 rounded font-bold">時:${stats.totalHours}h</span>`:''}
+                </div>
+            </td>`;
+
+            days.forEach(d => {
+                const key=`${d.fullDate}_${emp.id}`, roleId=this.data.shifts[key], request=this.data.requests[key];
+                const role=this.data.roles.find(r=>r.id===roleId);
+                if (roleId && roleId!=='off') { if(!dailyCounts[d.fullDate][roleId]) dailyCounts[d.fullDate][roleId]=0; dailyCounts[d.fullDate][roleId]++; }
+
+                let cellStyle='', cellContent='', overlayContent='';
+                const violation = this.checkCellViolation(d.fullDate, emp.id, roleId);
+
+                if (request) {
+                    const type = typeof request==='string' ? 'all' : request.type;
+                    const period = request.period || 'all';
+                    let badge = '';
+                    if (period==='am') badge=`<div class="absolute top-0 right-0 m-0.5"><span class="bg-white text-[9px] px-1 rounded font-bold border" style="color:inherit;">AM</span></div>`;
+                    if (period==='pm') badge=`<div class="absolute bottom-0 right-0 m-0.5"><span class="bg-white text-[9px] px-1 rounded font-bold border" style="color:inherit;">PM</span></div>`;
+
+                    if (type==='all') overlayContent=`<div class="absolute inset-0 flex items-center justify-center bg-gray-50 bg-opacity-90"><span class="material-icons text-base" style="color:#EA3323;">close</span></div>`;
+                    else if (type==='am') overlayContent=`<div class="absolute top-0 right-0 m-0.5"><span class="bg-white text-[9px] px-1 rounded font-bold border border-red-200" style="color:#EA3323;">AM休</span></div>`;
+                    else if (type==='pm') overlayContent=`<div class="absolute bottom-0 right-0 m-0.5"><span class="bg-white text-[9px] px-1 rounded font-bold border border-red-200" style="color:#EA3323;">PM休</span></div>`;
+                    else if (type==='time') overlayContent=`<div class="absolute bottom-0 left-0 m-0.5"><span class="bg-white text-[9px] px-1 rounded font-bold border border-red-200" style="color:#EA3323;">${request.value}h休</span></div>`;
+                    else if (type==='trip') { cellStyle='background-color:#ffedd5;color:#9a3412;'; cellContent=`<div class="flex flex-col items-center justify-center h-full leading-none relative"><span class="material-icons text-base mb-0.5">business_center</span><span class="text-[10px]">出張</span>${badge}</div>`; }
+                    else if (type==='meeting') { cellStyle='background-color:#dbeafe;color:#1e40af;'; cellContent=`<div class="flex flex-col items-center justify-center h-full leading-none relative"><span class="material-icons text-base mb-0.5">groups</span><span class="text-[10px]">会議</span>${badge}</div>`; }
+                    else if (type==='other_work') { cellStyle='background-color:#dcfce7;color:#166534;'; cellContent=`<div class="flex flex-col items-center justify-center h-full leading-none relative"><span class="material-icons text-base mb-0.5">more_horiz</span><span class="text-[10px]">他</span>${badge}</div>`; }
+                }
+
+                if (role && !cellContent) {
+                    cellStyle=`background-color:${role.color};color:${role.text};`;
+                    cellContent=`<div class="flex flex-col items-center justify-center h-full leading-none relative z-0"><span class="material-icons text-base mb-0.5">${role.icon}</span><span class="text-[10px]">${role.short}</span></div>`;
+                }
+                if (overlayContent) cellContent += overlayContent;
+                if (violation) cellStyle += ';border:2px solid red;';
+
+                bHtml += `<td onclick="app.openCellModal('${d.fullDate}','${emp.id}')" class="border text-center cursor-pointer hover:brightness-95 transition-all font-bold h-[70px] relative p-0" style="${cellStyle}" title="${violation||''}">${cellContent}</td>`;
+            });
+            bHtml += '</tr>';
+        });
+        document.getElementById('shift-body').innerHTML = bHtml;
+
+        // Footer
+        let fHtml = '';
+        this.data.roles.filter(r=>r.id!=='off').forEach(role => {
+            fHtml += `<tr class="text-xs"><td class="sticky-col bg-gray-50 p-1 border text-right font-bold z-10 text-gray-800 flex items-center justify-end gap-1 h-[30px]" style="border-left:4px solid ${role.color}">
+                <span class="material-icons text-sm" style="color:${role.text};background:${role.color};border-radius:50%;padding:2px;font-size:12px;">${role.icon}</span>${role.name}合計
+            </td>`;
+            days.forEach(d => {
+                const cnt = dailyCounts[d.fullDate][role.id]||0, req=this.data.settings.minStaffCounts[role.id]||0;
+                const short = cnt < req;
+                fHtml += `<td class="border text-center p-1 ${short?'bg-red-50 text-red-600 font-bold border-red-200 border':''}" title="${short?`不足(必要:${req})`:''}'">${cnt}</td>`;
+            });
+            fHtml += '</tr>';
+        });
+        document.getElementById('shift-footer').innerHTML = fHtml;
+    },
+
+    checkCellViolation(dateStr, empId, currentRole) {
+        if (!currentRole || currentRole==='off') return null;
+        const date = new Date(dateStr), max = parseInt(this.data.settings.maxConsecutiveDays)||5;
+        let consecutive = 1;
+        for (let i = 1; i <= max+1; i++) {
+            const d = new Date(date); d.setDate(date.getDate()-i);
+            const k=`${this.formatDate(d)}_${empId}`, r=this.data.shifts[k], req=this.data.requests[k];
+            const isWork = (r&&r!=='off')||(req&&(req.type==='trip'||req.type==='meeting'||req.type==='other_work'));
+            if (isWork) consecutive++; else break;
+        }
+        if (consecutive > max) return `連続勤務日数(${max}日)を超過`;
+        return null;
+    },
+
+    formatDate(date) {
+        return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+    },
+
+    checkConsecutiveWork(dateStr, empId) {
+        let count = 0;
+        const current = new Date(dateStr);
+        for (let i = 1; i <= 10; i++) {
+            const prev = new Date(current); prev.setDate(prev.getDate()-i);
+            const k=`${this.formatDate(prev)}_${empId}`, r=this.data.shifts[k], req=this.data.requests[k];
+            const isWork = (r&&r!=='off')||(req&&(req.type==='trip'||req.type==='meeting'||req.type==='other_work'));
+            if (isWork) count++; else break;
+        }
+        return count;
+    },
+
+    // =====================
+    // CELL MODAL
+    // =====================
+    openCellModal(dateStr, empId) {
+        this.ui.selectedCell = { dateStr, empId };
+        const emp = this.data.employees.find(e=>e.id===empId);
+        document.getElementById('cell-modal-title').textContent = `${emp.name} (${dateStr})`;
+        document.getElementById('req-time-input').classList.add('hidden');
+        document.getElementById('req-hours-val').value = '';
+        const container = document.getElementById('cell-role-options');
+        container.innerHTML = '';
+        this.data.roles.forEach(role => {
+            const btn = document.createElement('button');
+            btn.className = 'w-full text-left px-3 py-2 rounded mb-1 text-sm font-bold flex justify-between items-center transition hover:opacity-80';
+            btn.style.backgroundColor = role.color;
+            btn.style.color = role.text;
+            btn.innerHTML = `<div class="flex items-center gap-2"><span class="material-icons text-lg">${role.icon}</span><span>${role.name}</span></div><span class="text-xs border border-current px-1 rounded">${role.short}</span>`;
+            btn.onclick = () => this.setCellRole(role.id);
+            container.appendChild(btn);
+        });
+        document.getElementById('modal-cell').classList.remove('hidden');
+    },
+
+    setCellRole(roleId) {
+        const { dateStr, empId } = this.ui.selectedCell, key=`${dateStr}_${empId}`;
+        this.data.shifts[key] = roleId;
+        delete this.data.requests[key];
+        this.saveData(); this.renderDashboard(); this.closeModal('modal-cell');
+    },
+
+    setCellRequest(reqObj) {
+        const { dateStr, empId } = this.ui.selectedCell, key=`${dateStr}_${empId}`;
+        if (reqObj===null) { delete this.data.requests[key]; }
+        else {
+            this.data.requests[key] = reqObj;
+            if (reqObj.type==='all') this.data.shifts[key]='off';
+            else if (reqObj.type==='trip'||reqObj.type==='meeting'||reqObj.type==='other_work') delete this.data.shifts[key];
+        }
+        this.saveData(); this.renderDashboard(); this.closeModal('modal-cell');
+    },
+
+    toggleTimeInput() { document.getElementById('req-time-input').classList.toggle('hidden'); },
+    submitTimeRequest() { const v=document.getElementById('req-hours-val').value; if(v) this.setCellRequest({type:'time',value:v}); },
+    toggleExportMenu(e) { e.stopPropagation(); document.getElementById('export-menu').classList.toggle('hidden'); },
+
+    // =====================
+    // AUTO GENERATE
+    // =====================
+    openGenerateModal() { document.getElementById('modal-generate').classList.remove('hidden'); },
+
+    runAutoGenerate() {
+        try {
+            const cur = new Date(this.data.currentDate), nxt = new Date(cur);
+            nxt.setMonth(nxt.getMonth()+1);
+            this.generateForMonth(cur);
+            this.generateForMonth(nxt);
+            this.saveData(); this.renderDashboard(); this.closeModal('modal-generate');
+            this.showMessage('今月と翌月のシフトを自動生成しました。');
+        } catch(e) { console.error(e); alert('自動生成エラー: '+e.message); }
+    },
+
+    generateForMonth(dateObj) {
+        const days=this.getDaysInMonth(dateObj), emps=this.data.employees;
+        const nightNeeded=parseInt(this.data.settings.minStaffCounts['night'])||2;
+        const userPriority=this.data.settings.assignmentPriority||['パート','臨時職員','正社員','管理職'];
+        const isWeekend=(d)=>d.day===0||d.day===6||d.isHoliday||d.isSpecific;
+
+        const empGroups={};
+        userPriority.forEach(t=>empGroups[t]=[]);
+        emps.forEach(e=>{ if(empGroups[e.type]) empGroups[e.type].push(e); else { if(!empGroups['Other']) empGroups['Other']=[]; empGroups['Other'].push(e); } });
+
+        const stats={};
+        const calcStats=()=>{
+            emps.forEach(e=>{
+                stats[e.id]={days:0,hours:0,weekendDays:0};
+                days.forEach(d=>{
+                    const k=`${d.fullDate}_${e.id}`, r=this.data.shifts[k], req=this.data.requests[k];
+                    const isWork=(r&&r!=='off')||(req&&(req.type==='trip'||req.type==='meeting'||req.type==='other_work'));
+                    if(isWork){ stats[e.id].days++; if(e.type==='パート') stats[e.id].hours+=(e.dailyHours||7.75); if(isWeekend(d)) stats[e.id].weekendDays++; }
+                });
+            });
+        };
+
+        days.forEach(d=>{ emps.forEach(e=>{ const k=`${d.fullDate}_${e.id}`, req=this.data.requests[k]; const isFixed=req&&(req.type==='trip'||req.type==='meeting'||req.type==='other_work'||req.type==='all'); if(isFixed){if(req.type==='all') this.data.shifts[k]='off';}else delete this.data.shifts[k]; }); });
+        calcStats();
+
+        const nightCrew=emps.filter(e=>e.roles&&e.roles.includes('night'));
+        days.forEach(d=>{
+            let assigned=0; const isW=isWeekend(d);
+            const cands=[...nightCrew].sort((a,b)=>{ if(isW){const wa=stats[a.id].weekendDays+(Math.random()*2),wb=stats[b.id].weekendDays+(Math.random()*2); if(Math.abs(wa-wb)>1.5) return wa-wb;} return (stats[a.id].days+Math.random()*2)-(stats[b.id].days+Math.random()*2); });
+            for(const c of cands){
+                if(assigned>=nightNeeded) break;
+                const k=`${d.fullDate}_${c.id}`;
+                if(this.data.requests[k]) continue;
+                const prevD=new Date(d.fullDate); prevD.setDate(prevD.getDate()-1);
+                if(this.data.shifts[`${this.formatDate(prevD)}_${c.id}`]==='night') continue;
+                this.data.shifts[k]='night'; stats[c.id].days++; if(c.type==='パート') stats[c.id].hours+=(c.dailyHours||7.75); if(isW) stats[c.id].weekendDays++; assigned++;
+                const nextD=new Date(d.fullDate); nextD.setDate(nextD.getDate()+1);
+                const nk=`${this.formatDate(nextD)}_${c.id}`; if(!this.data.requests[nk]) this.data.shifts[nk]='off';
+            }
+        });
+
+        const neededRoles=[];
+        this.data.roles.forEach(r=>{ if(r.id==='off'||r.id==='night') return; const cnt=this.data.settings.minStaffCounts[r.id]||0; for(let i=0;i<cnt;i++) neededRoles.push(r.id); });
+
+        days.forEach(d=>{
+            const isW=isWeekend(d); let rolesToFill=[...neededRoles];
+            [...userPriority,'Other'].forEach(grp=>{
+                const grpEmps=empGroups[grp]; if(!grpEmps||!grpEmps.length) return;
+                const sorted=[...grpEmps].sort((a,b)=>{ if(isW){const wa=stats[a.id].weekendDays+(Math.random()*1.5),wb=stats[b.id].weekendDays+(Math.random()*1.5); if(Math.abs(wa-wb)>1) return wa-wb;} const s=(e)=>e.type==='パート'?(stats[e.id].hours/8):stats[e.id].days; return (s(a)+Math.random()*2)-(s(b)+Math.random()*2); });
+                sorted.forEach(e=>{
+                    const k=`${d.fullDate}_${e.id}`;
+                    if(this.data.shifts[k]||this.data.requests[k]) return;
+                    if(this.checkConsecutiveWork(d.fullDate,e.id)>=this.data.settings.maxConsecutiveDays){ this.data.shifts[k]='off'; return; }
+                    let ok=false;
+                    for(let i=0;i<rolesToFill.length;i++){ if(e.roles.includes(rolesToFill[i])){ this.data.shifts[k]=rolesToFill[i]; rolesToFill.splice(i,1); ok=true; stats[e.id].days++; if(e.type==='パート') stats[e.id].hours+=(e.dailyHours||7.75); if(isW) stats[e.id].weekendDays++; break; } }
+                    if(!ok){ if(e.roles.includes('office')){ if(Math.random()>0.7){ this.data.shifts[k]='office'; stats[e.id].days++; if(e.type==='パート') stats[e.id].hours+=(e.dailyHours||7.75); if(isW) stats[e.id].weekendDays++; }else this.data.shifts[k]='off'; }else this.data.shifts[k]='off'; }
+                });
+            });
+        });
+    },
+
+    // =====================
+    // EMPLOYEES
+    // =====================
+    renderEmployeeList() {
+        document.getElementById('employee-list-body').innerHTML = this.data.employees.map(e=>`
+            <tr class="border-b hover:bg-gray-50">
+                <td class="p-3">${e.name}</td>
+                <td class="p-3"><span class="px-2 py-1 rounded text-xs ${e.type==='正社員'?'bg-blue-100 text-blue-800':e.type==='パート'?'bg-green-100 text-green-800':'bg-gray-100 text-gray-800'}">${e.type}</span></td>
+                <td class="p-3 text-sm">${e.type==='パート'?(e.dailyHours||7.75)+'h':'-'}</td>
+                <td class="p-3"><div class="flex flex-wrap gap-1">${(e.roles||[]).map(rId=>{ const r=this.data.roles.find(r=>r.id===rId); return r?`<span class="material-icons text-sm border rounded p-0.5" style="color:${r.text};background:${r.color}" title="${r.name}">${r.icon}</span>`:''; }).join('')}</div></td>
+                <td class="p-3 text-center">
+                    <button onclick="app.openEmployeeModal('${e.id}')" class="text-blue-600 hover:text-blue-800 mr-2"><span class="material-icons">edit</span></button>
+                    <button onclick="app.deleteEmployee('${e.id}')" class="text-red-600 hover:text-red-800"><span class="material-icons">delete</span></button>
+                </td>
+            </tr>`).join('');
+    },
+
+    openEmployeeModal(id=null) {
+        const rolesContainer = document.getElementById('emp-roles-check');
+        rolesContainer.innerHTML = this.data.roles.filter(r=>r.id!=='off').map(r=>`
+            <label class="flex items-center gap-1 text-sm bg-gray-50 p-2 rounded border cursor-pointer hover:bg-gray-100">
+                <input type="checkbox" name="emp-role" value="${r.id}" class="text-indigo-600">
+                <span class="material-icons text-base text-gray-600">${r.icon}</span>${r.name}
+            </label>`).join('');
+
+        if (id) {
+            const emp = this.data.employees.find(e=>e.id===id);
+            document.getElementById('modal-employee-title').textContent = '従業員編集';
+            document.getElementById('emp-id').value = emp.id;
+            document.getElementById('emp-name').value = emp.name;
+            document.getElementById('emp-type').value = emp.type;
+            document.getElementById('emp-hours').value = emp.dailyHours||7.75;
+            rolesContainer.querySelectorAll('input[type="checkbox"]').forEach(cb=>{ cb.checked=emp.roles&&emp.roles.includes(cb.value); });
+        } else {
+            document.getElementById('modal-employee-title').textContent = '新規従業員登録';
+            document.getElementById('emp-id').value = '';
+            document.getElementById('employee-form').reset();
+            document.getElementById('emp-hours').value = 7.75;
+            rolesContainer.querySelectorAll('input[type="checkbox"]').forEach(cb=>{ cb.checked=true; });
+        }
+        document.getElementById('modal-employee').classList.remove('hidden');
+    },
+
+    saveEmployee() {
+        const id=document.getElementById('emp-id').value, name=document.getElementById('emp-name').value;
+        const type=document.getElementById('emp-type').value, dailyHours=parseFloat(document.getElementById('emp-hours').value)||7.75;
+        const roles=Array.from(document.querySelectorAll('input[name="emp-role"]:checked')).map(cb=>cb.value);
+        if (id) {
+            const idx=this.data.employees.findIndex(e=>e.id===id);
+            this.data.employees[idx]={...this.data.employees[idx],name,type,dailyHours,roles};
+        } else {
+            this.data.employees.push({id:'emp_'+Date.now(),name,type,dailyHours,roles});
+        }
+        this.saveData(); this.renderEmployeeList(); this.renderDashboard(); this.closeModal('modal-employee');
+    },
+
+    deleteEmployee(id) { this.confirmAction('delete_employee', id); },
+
+    // =====================
+    // EXPORT
+    // =====================
+    exportExcel() {
+        if (typeof XLSX==='undefined') { this.showMessage('Excel出力ライブラリが読み込まれていません。'); return; }
+        const days=this.getDaysInMonth(this.data.currentDate);
+        const dayNames=['日','月','火','水','木','金','土'];
+        const header=['氏名',...days.map(d=>`${d.date}(${dayNames[d.day]})`)];
+        const data=this.data.employees.map(emp=>{
+            const row=[emp.name];
+            days.forEach(d=>{
+                const key=`${d.fullDate}_${emp.id}`, roleId=this.data.shifts[key], role=this.data.roles.find(r=>r.id===roleId);
+                let val=role?role.name:'';
+                const req=this.data.requests[key];
+                if(req){ if(req.type==='trip') val='出張'; else if(req.type==='meeting') val='会議'; else if(req.type==='other_work') val='他'; else if(req.type==='all') val='休'; }
+                row.push(val);
+            });
+            return row;
+        });
+        const ws=XLSX.utils.aoa_to_sheet([header,...data]), wb=XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb,ws,"Shift");
+        XLSX.writeFile(wb,`Shift_${this.data.currentDate.getFullYear()}_${this.data.currentDate.getMonth()+1}.xlsx`);
+    },
+
+    exportCSV() {
+        const days=this.getDaysInMonth(this.data.currentDate);
+        let csv="\uFEFF"+"Name,"+days.map(d=>d.date).join(",")+"\r\n";
+        this.data.employees.forEach(emp=>{
+            let row=emp.name;
+            days.forEach(d=>{
+                const key=`${d.fullDate}_${emp.id}`, roleId=this.data.shifts[key], role=this.data.roles.find(r=>r.id===roleId);
+                let val=role?role.name:'';
+                const req=this.data.requests[key];
+                if(req){ if(req.type==='trip') val='出張'; else if(req.type==='meeting') val='会議'; else if(req.type==='other_work') val='他'; else if(req.type==='all') val='休'; }
+                row+=`,${val}`;
+            });
+            csv+=row+"\r\n";
+        });
+        this.downloadBlob(new Blob([csv],{type:'text/csv;charset=utf-8;'}), 'shift_export.csv');
+    },
+
+    exportPDF() { window.print(); },
+
+    // =====================
+    // SETTINGS
+    // =====================
+    renderSettings() {
+        document.getElementById('setting-max-consecutive').value = this.data.settings.maxConsecutiveDays;
+        const priorityList = this.data.settings.assignmentPriority||['パート','臨時職員','正社員','管理職'];
+        document.getElementById('priority-list-container').innerHTML = priorityList.map((type,idx)=>`
+            <div class="flex items-center justify-between bg-white p-2 rounded border mb-2">
+                <span class="font-bold text-gray-700">${idx+1}. ${type}</span>
+                <div class="flex gap-1">
+                    ${idx>0?`<button onclick="app.movePriority(${idx},-1)" class="p-1 hover:bg-gray-100 rounded"><span class="material-icons text-sm">arrow_upward</span></button>`:''}
+                    ${idx<priorityList.length-1?`<button onclick="app.movePriority(${idx},1)" class="p-1 hover:bg-gray-100 rounded"><span class="material-icons text-sm">arrow_downward</span></button>`:''}
+                </div>
+            </div>`).join('');
+
+        document.getElementById('setting-role-counts').innerHTML = this.data.roles.filter(r=>r.id!=='off').map(r=>`
+            <div class="flex items-center justify-between bg-white p-2 rounded border">
+                <label class="text-sm font-bold flex items-center gap-2">
+                    <span class="material-icons text-sm" style="color:${r.text};background:${r.color};border-radius:4px;padding:2px;">${r.icon}</span>${r.name}
+                </label>
+                <input type="number" data-role="${r.id}" class="role-count-input border rounded p-1 w-16 text-center" value="${this.data.settings.minStaffCounts[r.id]||0}" min="0">
+            </div>`).join('');
+
+        let edHtml = this.data.roles.map((r,idx)=>{
+            const isSys=r.id==='off';
+            return `<div class="flex flex-col gap-2 border p-3 rounded bg-gray-50">
+                <div class="flex items-center gap-2">
+                    <div class="w-10 h-10 flex items-center justify-center rounded text-xl shadow-sm border" style="background-color:${r.color};color:${r.text}"><span class="material-icons">${r.icon||'help'}</span></div>
+                    <div class="flex-1 grid grid-cols-2 md:grid-cols-5 gap-2">
+                        <div><label class="text-xs text-gray-500">名称</label><input type="text" class="border rounded w-full px-1 text-sm h-8" value="${r.name}" onchange="app.updateRole(${idx},'name',this.value)"></div>
+                        <div><label class="text-xs text-gray-500">略称</label><input type="text" class="border rounded w-full px-1 text-sm h-8" value="${r.short}" onchange="app.updateRole(${idx},'short',this.value)"></div>
+                        <div><label class="text-xs text-gray-500">アイコン</label><input type="text" class="border rounded w-full px-1 text-sm h-8 font-mono" value="${r.icon||''}" onchange="app.updateRole(${idx},'icon',this.value)"></div>
+                        <div><label class="text-xs text-gray-500">背景色</label><input type="color" class="border rounded w-full h-8 cursor-pointer" value="${r.color}" onchange="app.updateRole(${idx},'color',this.value)"></div>
+                        <div><label class="text-xs text-gray-500">文字色</label><input type="color" class="border rounded w-full h-8 cursor-pointer" value="${r.text}" onchange="app.updateRole(${idx},'text',this.value)"></div>
+                    </div>
+                    ${!isSys?`<button onclick="app.deleteRole(${idx})" class="text-gray-400 hover:text-red-500 p-1"><span class="material-icons">delete</span></button>`:'<div class="w-8"></div>'}
+                </div>
+            </div>`;
+        }).join('');
+        edHtml += `<div class="mt-4 border-t pt-4 flex justify-center"><button onclick="app.addRole()" class="bg-indigo-100 text-indigo-700 hover:bg-indigo-200 px-6 py-2 rounded-full font-bold flex items-center gap-2"><span class="material-icons">add_circle</span> 新しい役割を追加</button></div>`;
+        document.getElementById('roles-config-editor').innerHTML = edHtml;
+    },
+
+    movePriority(idx, dir) {
+        const list=this.data.settings.assignmentPriority, tmp=list[idx];
+        list[idx]=list[idx+dir]; list[idx+dir]=tmp; this.renderSettings();
+    },
+
+    updateRole(idx, field, val) { this.data.roles[idx][field]=val; this.renderSettings(); },
+
+    addRole() {
+        const newId='role_'+Date.now();
+        this.data.roles.push({id:newId,name:'新規役割',short:'新',color:'#e2e8f0',text:'#1e293b',icon:'star'});
+        this.data.settings.minStaffCounts[newId]=0;
+        this.saveData(); this.renderSettings();
+    },
+
+    deleteRole(idx) {
+        const role=this.data.roles[idx];
+        if(role.id==='off'){ this.showMessage('「公休」は削除できません'); return; }
+        this.confirmAction('delete_role', idx);
+    },
+
+    saveSettings() {
+        this.data.settings.maxConsecutiveDays=parseInt(document.getElementById('setting-max-consecutive').value);
+        document.querySelectorAll('.role-count-input').forEach(inp=>{ this.data.settings.minStaffCounts[inp.dataset.role]=parseInt(inp.value)||0; });
+        this.saveData(); this.showMessage('設定を保存しました'); this.renderDashboard();
+    },
+
+    // =====================
+    // CONFIRM / ACTIONS
+    // =====================
+    confirmAction(type, data=null) {
+        this.ui.pendingAction={type,data};
+        const txt=document.getElementById('confirm-text'), btn=document.getElementById('confirm-btn-exec'), opts=document.getElementById('confirm-options');
+        opts.classList.add('hidden'); document.getElementById('confirm-option-check').checked=false;
+        if(type==='delete_employee') { txt.innerHTML='本当にこの従業員を削除しますか？'; btn.textContent='削除する'; }
+        else if(type==='clear_month') { txt.innerHTML='表示中の月のシフトを全てクリアしますか？'; opts.classList.remove('hidden'); btn.textContent='クリアする'; }
+        else if(type==='delete_role') { txt.innerHTML='この役割を削除しますか？'; btn.textContent='削除する'; }
+        else if(type==='reset_all') { txt.innerHTML='すべてのデータを削除し初期化しますか？<br><span class="text-sm font-normal text-red-500">この操作は取り消せません。</span>'; btn.textContent='完全に削除する'; }
+        else if(type==='clear_current_data') { txt.innerHTML='現在のデータを空にしますか？'; btn.textContent='空にする'; }
+        document.getElementById('modal-confirm').classList.remove('hidden');
+    },
+
+    executeAction() {
+        const {type,data}=this.ui.pendingAction;
+        const inclReq=document.getElementById('confirm-option-check').checked;
+        if(type==='delete_employee'){ this.data.employees=this.data.employees.filter(e=>e.id!==data); this.saveData(); this.renderEmployeeList(); this.renderDashboard(); }
+        else if(type==='clear_month') this.clearCurrentMonthShifts(inclReq);
+        else if(type==='delete_role'){ const r=this.data.roles[data]; this.data.roles.splice(data,1); delete this.data.settings.minStaffCounts[r.id]; this.saveData(); this.renderSettings(); this.renderDashboard(); }
+        else if(type==='reset_all') this.resetAllData();
+        else if(type==='clear_current_data') this.clearCurrentDataOnly();
+        this.closeModal('modal-confirm'); this.ui.pendingAction=null;
+    },
+
+    clearCurrentMonthShifts(inclReq) {
+        const days=this.getDaysInMonth(this.data.currentDate);
+        days.forEach(d=>{ this.data.employees.forEach(e=>{ const k=`${d.fullDate}_${e.id}`; delete this.data.shifts[k]; if(inclReq) delete this.data.requests[k]; }); });
+        this.saveData(); this.renderDashboard(); this.showMessage('シフトをクリアしました。'+(inclReq?'(希望休含む)':''));
+    },
+
+    async resetAllData() {
+        try {
+            await this.fbSet('appData', null);
+            location.reload();
+        } catch(e) { this.showMessage('初期化エラー: '+e.message); }
+    },
+
+    clearCurrentDataOnly() {
+        this.data.employees=[]; this.data.shifts={}; this.data.requests={}; this.data.specificDays={};
+        this.saveData(); this.renderDashboard(); this.renderEmployeeList(); this.showMessage('データを空にしました。');
+    },
+
+    showMessage(text) {
+        document.getElementById('message-text').innerHTML=text.replace(/\n/g,'<br>');
+        document.getElementById('modal-message').classList.remove('hidden');
+    },
+
+    closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 };
+
+// Start when Firebase is ready
+window.addEventListener('firebaseReady', () => app.init());
+setTimeout(() => {
+    if (!window._firebaseReady) {
+        document.getElementById('loading-status').textContent = 'Firebase接続がタイムアウトしました。ページを再読み込みしてください。';
+    }
+}, 10000);
+</script>
+</body>
+</html>
